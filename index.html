@@ -3,86 +3,98 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>21M With Privacy — Chatbot</title>
+  <title>21M With Privacy — Embedded Chat</title>
   <meta name="theme-color" content="#0b1220" />
   <style>
-    :root { --ink:#0b1220; }
+    :root { --ink:#0b1220; --card:#0f172a; --text:#e5e7eb; --muted:#cbd5e1; }
     *{box-sizing:border-box}
     body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:#0b1220;color:#fff}
 
     header{padding:48px 20px 24px;text-align:center}
     h1{margin:0 0 10px;font-size:clamp(28px,4vw,44px)}
-    p.lead{margin:0 auto;max-width:800px;color:#cbd5e1}
+    p.lead{margin:0 auto;max-width:900px;color:#cbd5e1}
 
-    main{padding:40px 20px 120px;display:grid;place-items:center}
-    .card{background:#0f172a;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:28px;max-width:900px;width:100%}
+    main{padding:40px 20px 80px;display:grid;gap:24px;place-items:center}
+    .card{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:24px;max-width:1000px;width:100%}
+    .card p{color:var(--muted);margin:0}
 
-    /* Chat widget */
-    .chat-launcher{position:fixed;right:20px;bottom:20px;border:0;border-radius:999px;padding:12px 16px;
-      box-shadow:0 6px 20px rgba(0,0,0,.25);background:#0b1220;color:#fff;font-weight:600;cursor:pointer;z-index:9999}
-    .chat-panel{position:fixed;right:20px;bottom:80px;width:340px;max-height:72vh;background:#fff;border-radius:14px;
-      box-shadow:0 12px 32px rgba(0,0,0,.25);display:none;flex-direction:column;overflow:hidden;z-index:9999}
-    .chat-header{padding:10px 12px;background:#0b1220;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:8px}
-    .chat-header-left{display:flex;align-items:center;gap:8px}
-    .status-dot{width:8px;height:8px;border-radius:999px;background:#999}
+    /* Embedded chat box */
+    .chat-container{max-width:1000px;width:100%}
+    .chat-panel{
+      display:flex;flex-direction:column;overflow:hidden;
+      width:100%; height:clamp(460px, 70vh, 720px);
+      background:#fff;color:#111;border-radius:16px;border:1px solid #e5e7eb;
+      box-shadow:0 20px 40px rgba(0,0,0,.35);
+    }
+    .chat-header{
+      padding:10px 12px;background:#0b1220;color:#fff;
+      display:flex;align-items:center;justify-content:space-between;gap:8px
+    }
+    .chat-header-left{display:flex;align-items:center;gap:10px}
+    .status-dot{width:9px;height:9px;border-radius:999px;background:#999}
     .status-ok{background:#22c55e}.status-bad{background:#ef4444}
     .chat-actions{display:flex;gap:6px}
-    .chat-iconbtn{background:transparent;border:0;color:#fff;opacity:.85;cursor:pointer;font-size:16px;line-height:1;padding:4px 6px;border-radius:6px}
+    .chat-iconbtn{
+      background:transparent;border:0;color:#fff;opacity:.9;cursor:pointer;
+      font-size:16px;line-height:1;padding:4px 6px;border-radius:6px
+    }
     .chat-iconbtn:hover{opacity:1;background:rgba(255,255,255,.12)}
-    .chat-body{padding:12px;overflow:auto;gap:8px;display:flex;flex-direction:column;max-height:54vh}
+    .chat-body{
+      padding:12px;overflow:auto;gap:8px;display:flex;flex-direction:column;flex:1; background:#fafafa
+    }
     .chat-msg{padding:8px 10px;border-radius:10px;max-width:85%;white-space:pre-wrap;word-wrap:break-word}
     .chat-user{align-self:flex-end;background:#e6f0ff}
     .chat-bot{align-self:flex-start;background:#f4f6f8}
-    .chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid #eee;background:#fafafa}
-    .chat-input input{flex:1;padding:10px;border:1px solid #ddd;border-radius:10px}
-    .chat-input button{padding:10px 14px;border:0;border-radius:10px;background:#0b1220;color:#fff;font-weight:600}
-    .chat-input button[disabled]{opacity:.6;cursor:not-allowed}
-
-    /* Debug drawer (hidden by default) */
-    .chat-debug{display:none;border-top:1px dashed #ddd;background:#f9fafb;color:#111;max-height:35vh;overflow:auto}
+    .chat-debug{display:none;border-top:1px dashed #e5e7eb;background:#f9fafb;color:#111;max-height:30vh;overflow:auto}
     .chat-debug pre{margin:0;padding:10px 12px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-wrap:break-word}
     .chat-debug .small{opacity:.8}
+    .chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid #eee;background:#fff}
+    .chat-input input{
+      flex:1;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:14px
+    }
+    .chat-input button{
+      padding:12px 14px;border:0;border-radius:10px;background:#0b1220;color:#fff;font-weight:600;min-width:88px
+    }
+    .chat-input button[disabled]{opacity:.6;cursor:not-allowed}
   </style>
 </head>
 <body>
   <header>
     <h1>21M With Privacy</h1>
-    <p class="lead">Floating chat bubble with serverless LLM backend + built-in debugging.</p>
+    <p class="lead">Embedded chat assistant with serverless backend, health check, and a built-in debug drawer.</p>
   </header>
+
   <main>
     <section class="card">
-      <p>Click the chat bubble (bottom-right). The server endpoint lives at <code>/api/chat</code>.
-      There’s also <code>/api/health</code> to verify runtime/region/key presence.</p>
+      <p>This page embeds the chat directly in the content. The API lives at <code>/api/chat?debug=1</code> and <code>/api/health</code>. Keep your server files from before; no backend change needed.</p>
+    </section>
+
+    <section class="chat-container">
+      <div class="chat-panel" id="chat-panel" role="region" aria-label="Site assistant chat">
+        <div class="chat-header">
+          <div class="chat-header-left">
+            <div class="status-dot" id="chat-status" title="API status"></div>
+            <div><strong>Ask me anything</strong></div>
+          </div>
+          <div class="chat-actions">
+            <button class="chat-iconbtn" id="chat-health" title="Health check">❤</button>
+            <button class="chat-iconbtn" id="chat-toggle-debug" title="Toggle debug">⚙︎</button>
+          </div>
+        </div>
+
+        <div class="chat-body" id="chat-body" aria-live="polite"></div>
+
+        <div class="chat-debug" id="chat-debug">
+          <pre id="chat-debug-pre" class="small">Debug off</pre>
+        </div>
+
+        <div class="chat-input">
+          <input id="chat-input" type="text" placeholder="Type a message…" aria-label="Message" />
+          <button id="chat-send">Send</button>
+        </div>
+      </div>
     </section>
   </main>
-
-  <!-- Chat widget -->
-  <button class="chat-launcher" id="chat-launcher" aria-haspopup="dialog" aria-controls="chat-panel" aria-expanded="false">Chat</button>
-
-  <div class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Site assistant">
-    <div class="chat-header">
-      <div class="chat-header-left">
-        <div class="status-dot" id="chat-status"></div>
-        <div>Ask me anything</div>
-      </div>
-      <div class="chat-actions">
-        <button class="chat-iconbtn" id="chat-health" title="Health check">❤</button>
-        <button class="chat-iconbtn" id="chat-toggle-debug" title="Toggle debug">⚙︎</button>
-        <button class="chat-iconbtn" id="chat-close" aria-label="Close chat">×</button>
-      </div>
-    </div>
-
-    <div class="chat-body" id="chat-body" aria-live="polite"></div>
-
-    <div class="chat-debug" id="chat-debug">
-      <pre id="chat-debug-pre" class="small">Debug off</pre>
-    </div>
-
-    <div class="chat-input">
-      <input id="chat-input" type="text" placeholder="Type a message…" aria-label="Message" />
-      <button id="chat-send">Send</button>
-    </div>
-  </div>
 
   <script>
     // --- Config ---
@@ -90,12 +102,10 @@
     const API_HEALTH = '/api/health';
 
     // --- Elements ---
-    const launcher = document.getElementById('chat-launcher');
     const panel = document.getElementById('chat-panel');
-    const body = document.getElementById('chat-body');
-    const input = document.getElementById('chat-input');
+    const bodyEl = document.getElementById('chat-body');
+    const inputEl = document.getElementById('chat-input');
     const sendBtn = document.getElementById('chat-send');
-    const closeBtn = document.getElementById('chat-close');
     const statusDot = document.getElementById('chat-status');
     const toggleDebugBtn = document.getElementById('chat-toggle-debug');
     const debugBox = document.getElementById('chat-debug');
@@ -106,21 +116,14 @@
     const messages = [
       { role: 'system', content: 'You are a concise, friendly site assistant.' }
     ];
-    let greeted = false;
 
     // --- Helpers ---
     function addMsg(text, who) {
       const div = document.createElement('div');
       div.className = 'chat-msg ' + (who === 'user' ? 'chat-user' : 'chat-bot');
       div.textContent = text;
-      body.appendChild(div);
-      body.scrollTop = body.scrollHeight;
-    }
-    function togglePanel(show) {
-      const isOpen = show ?? (panel.style.display !== 'flex');
-      panel.style.display = isOpen ? 'flex' : 'none';
-      launcher.setAttribute('aria-expanded', String(isOpen));
-      if (isOpen) input.focus();
+      bodyEl.appendChild(div);
+      bodyEl.scrollTop = bodyEl.scrollHeight;
     }
     function setStatus(ok) {
       statusDot.classList.remove('status-ok','status-bad');
@@ -147,9 +150,9 @@
     }
 
     async function send() {
-      const text = input.value.trim();
+      const text = inputEl.value.trim();
       if (!text) return;
-      input.value = '';
+      inputEl.value = '';
       addMsg(text, 'user');
 
       // typing placeholder
@@ -170,20 +173,19 @@
 
         let data = {};
         try { data = await res.json(); } catch {}
-        const latency = Math.round(t1 - t0);
 
         if (!res.ok) {
-          body.lastChild.textContent = `Server error: ${res.status}`;
+          bodyEl.lastChild.textContent = `Server error: ${res.status}`;
           setStatus(false);
         } else {
-          body.lastChild.textContent = data.reply || 'Sorry, no reply.';
+          bodyEl.lastChild.textContent = data.reply || 'Sorry, no reply.';
         }
 
-        // Show debug (without cluttering the chat)
+        // Show debug info
         showDebug({
           endpoint: 'chat',
           httpStatus: res.status,
-          latencyMs: latency,
+          latencyMs: Math.round(t1 - t0),
           requestId: reqId,
           debug: data.debug || null
         });
@@ -191,27 +193,16 @@
         // Persist conversation
         if (data.reply) messages.push({ role: 'user', content: text }, { role: 'assistant', content: data.reply });
       } catch (e) {
-        body.lastChild.textContent = 'Error talking to the bot. Is /api/chat deployed?';
+        bodyEl.lastChild.textContent = 'Error talking to the bot. Is /api/chat deployed?';
         setStatus(false);
         showDebug({ endpoint: 'chat', error: String(e) });
       } finally {
         sendBtn.disabled = false;
-        body.scrollTop = body.scrollHeight;
+        bodyEl.scrollTop = bodyEl.scrollHeight;
       }
     }
 
     // --- UI wiring ---
-    launcher.addEventListener('click', async () => {
-      togglePanel(true);
-      if (!greeted) {
-        greeted = true;
-        setTimeout(() =>
-          addMsg("Hi! I can answer questions about the campaign. Ask me about Zcash, wallets, or #21MWithPrivacy.", 'bot'), 50
-        );
-        healthCheck();
-      }
-    });
-    closeBtn.addEventListener('click', () => togglePanel(false));
     toggleDebugBtn.addEventListener('click', () => {
       const show = debugBox.style.display !== 'block';
       debugBox.style.display = show ? 'block' : 'none';
@@ -220,9 +211,15 @@
     healthBtn.addEventListener('click', () => healthCheck());
 
     sendBtn.addEventListener('click', send);
-    input.addEventListener('keydown', (e) => {
+    inputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-      if (e.key === 'Escape') togglePanel(false);
+    });
+
+    // --- On load: greet + health check ---
+    window.addEventListener('DOMContentLoaded', () => {
+      addMsg("Hi! I can answer questions about the campaign. Ask me about Zcash, wallets, or #21MWithPrivacy.", 'bot');
+      inputEl.focus();
+      healthCheck();
     });
   </script>
 </body>
