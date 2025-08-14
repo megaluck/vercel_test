@@ -2,7 +2,7 @@
   "name": "zcash-chat",
   "private": true,
   "scripts": {
-    "build:kb": "node scripts/build-knowledge.js"
+    "build:kb": "node scripts/build-keyword-index.js"
   },
   "dependencies": {
     "pdf-parse": "^1.1.1"
