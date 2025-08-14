@@ -3,22 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>21M With Privacy — Embedded Chat</title>
+  <title>21M With Privacy — Embedded Chat (GPT-5 + RAG)</title>
   <meta name="theme-color" content="#0b1220" />
   <style>
     :root { --ink:#0b1220; --card:#0f172a; --text:#e5e7eb; --muted:#cbd5e1; }
     *{box-sizing:border-box}
     body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:#0b1220;color:#fff}
-
     header{padding:48px 20px 24px;text-align:center}
     h1{margin:0 0 10px;font-size:clamp(28px,4vw,44px)}
     p.lead{margin:0 auto;max-width:900px;color:#cbd5e1}
-
     main{padding:40px 20px 80px;display:grid;gap:24px;place-items:center}
     .card{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:24px;max-width:1000px;width:100%}
     .card p{color:var(--muted);margin:0}
-
-    /* Embedded chat box */
     .chat-container{max-width:1000px;width:100%}
     .chat-panel{
       display:flex;flex-direction:column;overflow:hidden;
@@ -26,22 +22,15 @@
       background:#fff;color:#111;border-radius:16px;border:1px solid #e5e7eb;
       box-shadow:0 20px 40px rgba(0,0,0,.35);
     }
-    .chat-header{
-      padding:10px 12px;background:#0b1220;color:#fff;
-      display:flex;align-items:center;justify-content:space-between;gap:8px
-    }
+    .chat-header{padding:10px 12px;background:#0b1220;color:#fff;display:flex;align-items:center;justify-content:space-between;gap:8px}
     .chat-header-left{display:flex;align-items:center;gap:10px}
     .status-dot{width:9px;height:9px;border-radius:999px;background:#999}
     .status-ok{background:#22c55e}.status-bad{background:#ef4444}
+    .model-badge{font-size:12px;opacity:.85}
     .chat-actions{display:flex;gap:6px}
-    .chat-iconbtn{
-      background:transparent;border:0;color:#fff;opacity:.9;cursor:pointer;
-      font-size:16px;line-height:1;padding:4px 6px;border-radius:6px
-    }
+    .chat-iconbtn{background:transparent;border:0;color:#fff;opacity:.9;cursor:pointer;font-size:16px;line-height:1;padding:4px 6px;border-radius:6px}
     .chat-iconbtn:hover{opacity:1;background:rgba(255,255,255,.12)}
-    .chat-body{
-      padding:12px;overflow:auto;gap:8px;display:flex;flex-direction:column;flex:1; background:#fafafa
-    }
+    .chat-body{padding:12px;overflow:auto;gap:8px;display:flex;flex-direction:column;flex:1;background:#fafafa}
     .chat-msg{padding:8px 10px;border-radius:10px;max-width:85%;white-space:pre-wrap;word-wrap:break-word}
     .chat-user{align-self:flex-end;background:#e6f0ff}
     .chat-bot{align-self:flex-start;background:#f4f6f8}
@@ -49,24 +38,20 @@
     .chat-debug pre{margin:0;padding:10px 12px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-wrap:break-word}
     .chat-debug .small{opacity:.8}
     .chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid #eee;background:#fff}
-    .chat-input input{
-      flex:1;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:14px
-    }
-    .chat-input button{
-      padding:12px 14px;border:0;border-radius:10px;background:#0b1220;color:#fff;font-weight:600;min-width:88px
-    }
+    .chat-input input{flex:1;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:14px}
+    .chat-input button{padding:12px 14px;border:0;border-radius:10px;background:#0b1220;color:#fff;font-weight:600;min-width:88px}
     .chat-input button[disabled]{opacity:.6;cursor:not-allowed}
   </style>
 </head>
 <body>
   <header>
     <h1>21M With Privacy</h1>
-    <p class="lead">Embedded chat assistant with serverless backend, health check, and a built-in debug drawer.</p>
+    <p class="lead">Embedded chat assistant powered by <strong>GPT-5</strong> + your knowledge base.</p>
   </header>
 
   <main>
     <section class="card">
-      <p>This page embeds the chat directly in the content. The API lives at <code>/api/chat?debug=1</code> and <code>/api/health</code>. Keep your server files from before; no backend change needed.</p>
+      <p>This page embeds the chat directly in the content. The API reads <code>prompt.txt</code> and searches <code>/knowledge/index.json</code> before answering.</p>
     </section>
 
     <section class="chat-container">
@@ -74,7 +59,7 @@
         <div class="chat-header">
           <div class="chat-header-left">
             <div class="status-dot" id="chat-status" title="API status"></div>
-            <div><strong>Ask me anything</strong></div>
+            <div><strong>Ask me anything</strong> <span class="model-badge" id="model-badge"></span></div>
           </div>
           <div class="chat-actions">
             <button class="chat-iconbtn" id="chat-health" title="Health check">❤</button>
@@ -97,12 +82,9 @@
   </main>
 
   <script>
-    // --- Config ---
     const API_CHAT = '/api/chat?debug=1';
     const API_HEALTH = '/api/health';
 
-    // --- Elements ---
-    const panel = document.getElementById('chat-panel');
     const bodyEl = document.getElementById('chat-body');
     const inputEl = document.getElementById('chat-input');
     const sendBtn = document.getElementById('chat-send');
@@ -111,13 +93,10 @@
     const debugBox = document.getElementById('chat-debug');
     const debugPre = document.getElementById('chat-debug-pre');
     const healthBtn = document.getElementById('chat-health');
+    const modelBadge = document.getElementById('model-badge');
 
-    // --- Conversation state ---
-    const messages = [
-      { role: 'system', content: 'You are a concise, friendly site assistant.' }
-    ];
+    const messages = [{ role: 'system', content: 'You are a concise, friendly site assistant.' }];
 
-    // --- Helpers ---
     function addMsg(text, who) {
       const div = document.createElement('div');
       div.className = 'chat-msg ' + (who === 'user' ? 'chat-user' : 'chat-bot');
@@ -133,16 +112,15 @@
       debugPre.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
     }
 
-    // --- API calls ---
     async function healthCheck() {
       try {
         const t0 = performance.now();
-        const r = await fetch(API_HEALTH, { method: 'GET' });
+        const r = await fetch(API_HEALTH);
         const t1 = performance.now();
         const data = await r.json();
         setStatus(Boolean(data.hasKey));
+        modelBadge.textContent = data.model ? `(${data.model})` : '';
         showDebug({ endpoint: 'health', httpStatus: r.status, latencyMs: Math.round(t1 - t0), data });
-        return data;
       } catch (e) {
         setStatus(false);
         showDebug({ endpoint: 'health', error: String(e) });
@@ -155,7 +133,6 @@
       inputEl.value = '';
       addMsg(text, 'user');
 
-      // typing placeholder
       addMsg('…', 'bot');
       sendBtn.disabled = true;
 
@@ -169,31 +146,14 @@
           body: JSON.stringify(payload)
         });
         const t1 = performance.now();
-        const reqId = res.headers.get('x-request-id');
-
         let data = {};
         try { data = await res.json(); } catch {}
-
-        if (!res.ok) {
-          bodyEl.lastChild.textContent = `Server error: ${res.status}`;
-          setStatus(false);
-        } else {
-          bodyEl.lastChild.textContent = data.reply || 'Sorry, no reply.';
-        }
-
-        // Show debug info
-        showDebug({
-          endpoint: 'chat',
-          httpStatus: res.status,
-          latencyMs: Math.round(t1 - t0),
-          requestId: reqId,
-          debug: data.debug || null
-        });
-
-        // Persist conversation
+        if (!res.ok) { addMsg('', 'bot'); bodyEl.lastChild.textContent = `Server error: ${res.status}`; setStatus(false); }
+        else { bodyEl.lastChild.textContent = data.reply || 'Sorry, no reply.'; }
+        showDebug({ endpoint: 'chat', httpStatus: res.status, latencyMs: Math.round(t1 - t0), debug: data.debug || null });
         if (data.reply) messages.push({ role: 'user', content: text }, { role: 'assistant', content: data.reply });
       } catch (e) {
-        bodyEl.lastChild.textContent = 'Error talking to the bot. Is /api/chat deployed?';
+        bodyEl.lastChild.textContent = 'Error talking to the bot.';
         setStatus(false);
         showDebug({ endpoint: 'chat', error: String(e) });
       } finally {
@@ -202,22 +162,17 @@
       }
     }
 
-    // --- UI wiring ---
     toggleDebugBtn.addEventListener('click', () => {
       const show = debugBox.style.display !== 'block';
       debugBox.style.display = show ? 'block' : 'none';
       if (show && debugPre.textContent === 'Debug off') showDebug('Debug on. Calls will print here.');
     });
     healthBtn.addEventListener('click', () => healthCheck());
-
     sendBtn.addEventListener('click', send);
-    inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-    });
+    inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 
-    // --- On load: greet + health check ---
     window.addEventListener('DOMContentLoaded', () => {
-      addMsg("Hi! I can answer questions about the campaign. Ask me about Zcash, wallets, or #21MWithPrivacy.", 'bot');
+      addMsg("Hi! Ask me about Zcash, wallets, or the #21MWithPrivacy movement. I use our knowledge base + GPT-5.", 'bot');
       inputEl.focus();
       healthCheck();
     });
