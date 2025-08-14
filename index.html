@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>21M With Privacy — Embedded Chat (with Rich Debug)</title>
+  <title>21M With Privacy — Embedded Chat (KB + Citations + Rich Debug)</title>
   <meta name="theme-color" content="#0b1220" />
   <style>
     :root { --ink:#0b1220; --card:#0f172a; --text:#e5e7eb; --muted:#cbd5e1; }
@@ -42,12 +42,19 @@
     .chat-iconbtn:hover{opacity:1;background:rgba(255,255,255,.12)}
 
     .chat-body{
-      padding:12px;overflow:auto;gap:8px;display:flex;flex-direction:column;flex:1; background:#fafafa
+      padding:12px;overflow:auto;gap:8px;display:flex;flex-direction:column;flex:1;background:#fafafa
     }
     .chat-msg{padding:8px 10px;border-radius:10px;max-width:85%;white-space:pre-wrap;word-wrap:break-word}
     .chat-user{align-self:flex-end;background:#e6f0ff}
     .chat-bot{align-self:flex-start;background:#f4f6f8}
 
+    /* Citations block */
+    .sources-block{margin-top:4px;background:#eef2ff;border:1px solid #dbe3ff}
+    .sources-title{font-weight:700;margin-bottom:6px}
+    .source-item{font-size:12px;line-height:1.4;margin:2px 0}
+    .source-score{opacity:.7}
+
+    /* Debug drawer */
     .chat-debug{display:none;border-top:1px dashed #e5e7eb;background:#f9fafb;color:#111;max-height:30vh;overflow:auto}
     .chat-debug pre{margin:0;padding:10px 12px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-wrap:break-word}
     .chat-debug .small{opacity:.8}
@@ -65,12 +72,12 @@
 <body>
   <header>
     <h1>21M With Privacy</h1>
-    <p class="lead">Embedded chat assistant powered by your prompt + knowledge base. Detailed errors show directly in the chat if anything goes wrong.</p>
+    <p class="lead">Embedded chat assistant powered by your <strong>prompt.txt</strong> + <strong>knowledge/index.json</strong>. Citations show when the KB is used.</p>
   </header>
 
   <main>
     <section class="card">
-      <p>This page embeds the chat directly in the content. The API reads <code>prompt.txt</code> and searches <code>/knowledge/index.json</code> before answering. Endpoints: <code>/api/chat?debug=1</code> and <code>/api/health</code>.</p>
+      <p>Endpoints: <code>/api/chat?debug=1</code>, <code>/api/health</code>, and <code>/api/rag-debug</code>. Use env <code>STRICT_KB_ONLY=1</code> to force “KB-only” answers.</p>
     </section>
 
     <section class="chat-container">
@@ -120,12 +127,13 @@
     const messages = [{ role: 'system', content: 'You are a concise, friendly site assistant.' }];
 
     // Helpers
-    function addMsg(text, who) {
+    function addMsg(text, who, extraClass='') {
       const div = document.createElement('div');
-      div.className = 'chat-msg ' + (who === 'user' ? 'chat-user' : 'chat-bot');
+      div.className = 'chat-msg ' + (who === 'user' ? 'chat-user' : 'chat-bot') + (extraClass ? (' ' + extraClass) : '');
       div.textContent = text;
       bodyEl.appendChild(div);
       bodyEl.scrollTop = bodyEl.scrollHeight;
+      return div;
     }
     function setStatus(ok) {
       statusDot.classList.remove('status-ok','status-bad');
@@ -144,6 +152,29 @@
       if (data?.debug?.openai_status) parts.push(`openai_status: ${data.debug.openai_status}`);
       if (data?.debug?.stack_head) parts.push(`stack:\n${data.debug.stack_head}`);
       return parts.join('\n');
+    }
+    function renderSources(sources) {
+      if (!Array.isArray(sources) || sources.length === 0) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'chat-msg chat-bot sources-block';
+      const title = document.createElement('div');
+      title.className = 'sources-title';
+      title.textContent = 'Sources used:';
+      wrap.appendChild(title);
+
+      sources.forEach((s, i) => {
+        const line = document.createElement('div');
+        line.className = 'source-item';
+        line.textContent = `[#${i+1}] ${s.title} (${s.file}) — score `;
+        const score = document.createElement('span');
+        score.className = 'source-score';
+        score.textContent = String(s.score);
+        line.appendChild(score);
+        wrap.appendChild(line);
+      });
+
+      bodyEl.appendChild(wrap);
+      bodyEl.scrollTop = bodyEl.scrollHeight;
     }
 
     // API calls
@@ -168,7 +199,7 @@
       inputEl.value = '';
       addMsg(text, 'user');
 
-      addMsg('…', 'bot');
+      const placeholder = addMsg('…', 'bot');
       sendBtn.disabled = true;
 
       const payload = { messages: messages.concat({ role: 'user', content: text }) };
@@ -186,10 +217,13 @@
         try { data = await res.json(); } catch {}
 
         if (!res.ok) {
-          bodyEl.lastChild.textContent = formatServerError(res.status, data);
+          placeholder.textContent = formatServerError(res.status, data);
           setStatus(false);
         } else {
-          bodyEl.lastChild.textContent = data.reply || 'Sorry, no reply.';
+          placeholder.textContent = data.reply || 'Sorry, no reply.';
+          if (Array.isArray(data.sources) && data.sources.length) {
+            renderSources(data.sources);
+          }
         }
 
         showDebug({
@@ -201,7 +235,7 @@
 
         if (data.reply) messages.push({ role: 'user', content: text }, { role: 'assistant', content: data.reply });
       } catch (e) {
-        bodyEl.lastChild.textContent = `Network error: ${String(e)}`;
+        placeholder.textContent = `Network error: ${String(e)}`;
         setStatus(false);
         showDebug({ endpoint: 'chat', error: String(e) });
       } finally {
@@ -222,7 +256,7 @@
 
     // On load: greet + health check
     window.addEventListener('DOMContentLoaded', () => {
-      addMsg("Hi! I answer using our prompt + knowledge base. If there’s an issue, I’ll show the exact error here.", 'bot');
+      addMsg("Hi! I answer using our knowledge base and will show citations below each answer. Ask me about Zcash, wallets, or #21MWithPrivacy.", 'bot');
       inputEl.focus();
       healthCheck();
     });
