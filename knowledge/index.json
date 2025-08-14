@@ -1,0 +1,109 @@
+// scripts/build-knowledge.js
+// Build a small embeddings index (RAG) from /knowledge/*.md|txt|pdf into /knowledge/index.json
+// Run: OPENAI_API_KEY=sk-... node scripts/build-knowledge.js
+
+const fs = require('fs');
+const fsp = require('fs/promises');
+const path = require('path');
+const pdfParse = require('pdf-parse');
+
+const ROOT = process.cwd();
+const KB_DIR = path.join(ROOT, 'knowledge');
+const OUT = path.join(KB_DIR, 'index.json');
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'text-embedding-3-small'; // 1536 dims (OpenAI docs)
+const MAX_WORDS = 350;      // chunk size
+const OVERLAP_WORDS = 60;   // overlap for context
+
+if (!process.env.OPENAI_API_KEY) {
+  console.error('Missing OPENAI_API_KEY'); process.exit(1);
+}
+
+async function* walk(dir) {
+  const dirents = await fsp.readdir(dir, { withFileTypes: true });
+  for (const d of dirents) {
+    const p = path.join(dir, d.name);
+    if (d.isDirectory()) yield* walk(p);
+    else if (/\.(md|txt|pdf)$/i.test(d.name)) yield p;
+  }
+}
+
+async function readFileSmart(file) {
+  if (/\.pdf$/i.test(file)) {
+    const data = await fsp.readFile(file);
+    const parsed = await pdfParse(data);
+    return parsed.text || '';
+  }
+  return await fsp.readFile(file, 'utf8');
+}
+
+function chunkWords(text, max = MAX_WORDS, overlap = OVERLAP_WORDS) {
+  const words = text.replace(/\s+/g, ' ').trim().split(' ');
+  const chunks = [];
+  for (let i = 0; i < words.length; i += (max - overlap)) {
+    const piece = words.slice(i, i + max).join(' ').trim();
+    if (piece) chunks.push(piece);
+  }
+  return chunks;
+}
+
+async function embed(texts) {
+  // Call OpenAI embeddings REST API via fetch (Node 18+/20+)
+  const res = await fetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` },
+    body: JSON.stringify({ model: EMBEDDING_MODEL, input: texts })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    console.error('Embeddings error:', data);
+    throw new Error(`Embedding failed ${res.status}`);
+  }
+  return data.data.map(d => d.embedding);
+}
+
+(async function run() {
+  const files = [];
+  for await (const f of walk(KB_DIR)) {
+    if (path.basename(f) === 'index.json') continue;
+    files.push(f);
+  }
+  if (!files.length) {
+    console.log('No KB files found in /knowledge'); process.exit(0);
+  }
+
+  const index = { embedding_model: EMBEDDING_MODEL, created_at: new Date().toISOString(), dims: null, docs: [], chunks: [] };
+  let globalIdx = 0;
+
+  for (const file of files) {
+    const rel = path.relative(ROOT, file);
+    const title = path.basename(file);
+    const text = await readFileSmart(file);
+    const pieces = chunkWords(text);
+    console.log(`Indexing: ${rel} (${pieces.length} chunks)`);
+
+    // Embed in batches of up to 100
+    const batchSize = 100;
+    for (let i = 0; i < pieces.length; i += batchSize) {
+      const batch = pieces.slice(i, i + batchSize);
+      const vectors = await embed(batch);
+      if (!index.dims && vectors[0]) index.dims = vectors[0].length;
+      vectors.forEach((vec, j) => {
+        const content = batch[j];
+        const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
+        index.chunks.push({
+          idx: globalIdx++,
+          file: rel,
+          title,
+          content,
+          embedding: vec,    // store full vector (simple + portable)
+          norm
+        });
+      });
+    }
+
+    index.docs.push({ file: rel, title });
+  }
+
+  await fsp.writeFile(OUT, JSON.stringify(index));
+  console.log(`Wrote ${OUT} with ${index.chunks.length} chunks from ${index.docs.length} files.`);
+})().catch(e => { console.error(e); process.exit(1); });
