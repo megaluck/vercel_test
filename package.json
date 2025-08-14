@@ -1,7 +1,9 @@
 {
   "name": "zcash-chat",
   "private": true,
+  "engines": { "node": "20.x" },
   "scripts": {
+    "build": "node scripts/build-keyword-index.js",
     "build:kb": "node scripts/build-keyword-index.js"
   },
   "dependencies": {
