@@ -1,4 +1,4 @@
-// Chat API: BM25 keyword retrieval (no embeddings) + prompt.txt + citations + strict mode + rich errors
+// Chat API: BM25 keyword retrieval (no embeddings) + prompt.txt + citations + optional LLM fallback + rich errors
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
@@ -14,11 +14,12 @@ const ROOT = process.cwd();
 const PROMPT_FILE = path.join(ROOT, 'prompt.txt');
 const KW_INDEX = path.join(ROOT, 'knowledge', 'keyword_index.json');
 
-const CHAT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const STRICT_KB = process.env.STRICT_KB_ONLY === '1';
-const THRESHOLD = Number(process.env.RAG_THRESHOLD || 0.08);
-const K1 = Number(process.env.BM25_K1 || 1.2);
-const B  = Number(process.env.BM25_B  || 0.75);
+const CHAT_MODEL   = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const STRICT_KB    = process.env.STRICT_KB_ONLY === '1';         // if true: never freestyle
+const ALLOW_FALLBACK = process.env.ALLOW_FALLBACK !== '0';        // default ON (behave like normal LLM if no KB)
+const THRESHOLD    = Number(process.env.RAG_THRESHOLD || 0.08);
+const K1           = Number(process.env.BM25_K1 || 1.2);
+const B            = Number(process.env.BM25_B  || 0.75);
 
 function rid(){ try { return crypto.randomUUID(); } catch { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`; } }
 function json(res, status, body, headers={}){ res.writeHead(status, { ...CORS, 'Content-Type':'application/json', ...headers }); res.end(JSON.stringify(body)); }
@@ -66,7 +67,7 @@ async function readKeywordIndex(){
 
 function idf(term, N, df){
   const n = df[term] || 0;
-  return Math.log((N - n + 0.5) / (n + 0.5) + 1); // BM25 idf (+1 keeps positive)
+  return Math.log((N - n + 0.5) / (n + 0.5) + 1);
 }
 function bm25Score(queryTokens, chunk, df, N, avgdl){
   let score = 0;
@@ -126,13 +127,15 @@ module.exports = async function handler(req, res){
 
     const [{ text: sysPrompt, sha1 }, kw] = await Promise.all([readPrompt(), readKeywordIndex()]);
 
-    // If no index yet
+    // If no index present at all
     if (!kw || !kw.chunks?.length) {
       if (STRICT_KB) return json(res, 200, { reply: "I don’t have this in my sources yet.", sources: [] });
+      // Freestyle (no KB available)
       const { reply, usage } = await openaiChat(CHAT_MODEL, [
-        { role:'system', content: sysPrompt }, { role:'user', content: userMsg }
+        { role:'system', content: sysPrompt },
+        { role:'user', content: userMsg }
       ]);
-      return json(res, 200, { reply, sources: [], debug: wantDebug ? { requestId:id, model:CHAT_MODEL, prompt_sha1: sha1, retriever:'none', usage } : undefined });
+      return json(res, 200, { reply, sources: [], debug: wantDebug ? { requestId:id, model:CHAT_MODEL, prompt_sha1: sha1, retriever:'none', mode:'fallback', usage } : undefined });
     }
 
     // BM25 retrieval
@@ -146,18 +149,36 @@ module.exports = async function handler(req, res){
     const top = scored.slice(0, 6).filter(r => r.score >= THRESHOLD);
     const sources = top.map((r,i)=>({ title: r.ch.title, file: r.ch.file, score: Number(r.score.toFixed(3)) }));
 
-    if (STRICT_KB && sources.length === 0) {
+    // If nothing matched: either refuse (strict) or freestyle (fallback)
+    if (sources.length === 0) {
+      if (STRICT_KB) {
+        return json(res, 200, {
+          reply: "I don’t have this in my sources.",
+          sources: [],
+          debug: wantDebug ? { requestId:id, model:CHAT_MODEL, prompt_sha1:sha1, retriever:"bm25", threshold:THRESHOLD, k1:K1, b:B, mode:'strict_no_kb' } : undefined
+        });
+      }
+      if (ALLOW_FALLBACK) {
+        const { reply, usage } = await openaiChat(CHAT_MODEL, [
+          { role:'system', content: sysPrompt + "\n\nIf no internal sources are provided, you may answer from general knowledge. Be concise and avoid fabricating specifics." },
+          { role:'user', content: userMsg }
+        ]);
+        return json(res, 200, {
+          reply,
+          sources: [],
+          debug: wantDebug ? { requestId:id, model:CHAT_MODEL, prompt_sha1:sha1, retriever:"bm25", threshold:THRESHOLD, k1:K1, b:B, mode:'fallback', usage } : undefined
+        });
+      }
+      // If fallback is disabled explicitly
       return json(res, 200, {
         reply: "I don’t have this in my sources.",
-        sources,
-        debug: wantDebug ? { requestId:id, model:CHAT_MODEL, prompt_sha1:sha1, retriever:"bm25", threshold:THRESHOLD, k1:K1, b:B } : undefined
+        sources: [],
+        debug: wantDebug ? { requestId:id, model:CHAT_MODEL, prompt_sha1:sha1, retriever:"bm25", threshold:THRESHOLD, k1:K1, b:B, mode:'no_fallback' } : undefined
       });
     }
 
-    const excerpts = sources.length
-      ? top.map((r,i)=>`[${i+1}] ${r.ch.title} (${r.ch.file})\n${r.ch.content}`).join("\n\n---\n\n")
-      : "(no relevant excerpts found)";
-
+    // We have sources → build grounded prompt
+    const excerpts = top.map((r,i)=>`[${i+1}] ${r.ch.title} (${r.ch.file})\n${r.ch.content}`).join("\n\n---\n\n");
     const systemMsg = [
       sysPrompt, '',
       'IMPORTANT:',
@@ -182,7 +203,7 @@ module.exports = async function handler(req, res){
       sources,
       debug: wantDebug ? {
         requestId: id, model: CHAT_MODEL, prompt_sha1: sha1,
-        retriever: "bm25", threshold: THRESHOLD, k1: K1, b: B, usage
+        retriever: "bm25", threshold: THRESHOLD, k1: K1, b: B, mode:'grounded', usage
       } : undefined
     }, { 'X-Request-Id': id });
   } catch (e) {
