@@ -10,9 +10,9 @@ const KB_DIR = path.join(ROOT, "knowledge");
 const OUT = path.join(KB_DIR, "keyword_index.json");
 
 // Tuning
-const MAX_WORDS = 300;         // chunk size
+const MAX_WORDS = 280;         // chunk size
 const OVERLAP_WORDS = 60;      // overlap
-const KEEP_TOP_TOKENS = 64;    // per-chunk tf cap
+const KEEP_TOP_TOKENS = 120;   // per-chunk tf cap (raised from 64 for jargon)
 const STOP = new Set(("a,an,and,are,as,at,be,by,for,from,has,have,he,her,his,if,in,is,it,its,of,on,or,our,she,that,the,them,they,this,to,was,were,will,with,you,your,about,into,than,then,there,which,who,whom,how,what,when,where,why"
 ).split(","));
 
@@ -36,7 +36,7 @@ async function* walk(dir){
 async function readFileSmart(file){
   if (/\.pdf$/i.test(file)) {
     const data = await fsp.readFile(file);
-    const parsed = await pdfParse(data);
+    const parsed = await pdfParse(data).catch(e => ({ text: "" }));
     return parsed.text || "";
   }
   return await fsp.readFile(file, "utf8");
@@ -62,6 +62,10 @@ function chunkWords(text, max=MAX_WORDS, overlap=OVERLAP_WORDS){
     if (path.basename(f) === "keyword_index.json") continue;
     files.push(f);
   }
+
+  console.log(`Found ${files.length} KB file(s):`);
+  files.forEach(f => console.log(" •", path.relative(ROOT, f)));
+
   if (!files.length) {
     console.log("No KB files found in /knowledge"); process.exit(0);
   }
@@ -70,9 +74,9 @@ function chunkWords(text, max=MAX_WORDS, overlap=OVERLAP_WORDS){
     type: "keyword",
     created_at: new Date().toISOString(),
     docs: [],
-    chunks: [],              // { idx, file, title, content, len, tfs: { token: tf }}
-    df: {},                  // { token: document-frequency across chunks }
-    N: 0,                    // num chunks
+    chunks: [],              // { idx, file, title, content, len, tfs }
+    df: {},
+    N: 0,
     avgdl: 0
   };
 
@@ -85,8 +89,12 @@ function chunkWords(text, max=MAX_WORDS, overlap=OVERLAP_WORDS){
     const text = await readFileSmart(file);
     const pieces = chunkWords(text);
 
-    console.log(`Indexing: ${rel} (${pieces.length} chunks)`);
-    pieces.forEach(piece => {
+    console.log(`Indexing: ${rel} → ${pieces.length} chunk(s)`);
+    if (pieces.length === 0) {
+      console.warn(`WARN: ${rel} produced 0 chunks (file empty or too short after normalization)`);
+    }
+
+    pieces.forEach((piece, pi) => {
       const toks = tokenize(piece);
       totalLen += toks.length;
 
@@ -120,5 +128,5 @@ function chunkWords(text, max=MAX_WORDS, overlap=OVERLAP_WORDS){
   index.avgdl = index.N ? totalLen / index.N : 0;
 
   await fsp.writeFile(OUT, JSON.stringify(index));
-  console.log(`Wrote ${OUT} with ${index.N} chunks from ${index.docs.length} files. avgdl=${index.avgdl.toFixed(1)}`);
+  console.log(`Wrote ${OUT} with ${index.N} chunk(s) from ${index.docs.length} doc(s). avgdl=${index.avgdl.toFixed(1)}`);
 })().catch(e=>{ console.error(e); process.exit(1); });
