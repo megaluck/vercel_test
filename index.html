@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>21M With Privacy — Chatbot Demo</title>
+  <meta name="description" content="Zcash campaign site with a built-in chatbot assistant." />
+  <meta name="theme-color" content="#0b1220" />
+
+  <style>
+    /* --- Demo page layout (not required for the widget) --- */
+    :root { --ink:#0b1220; --bg:#0e1422; --muted:#aab3c5; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; color:#fff; background:linear-gradient(180deg, #0b1220 0%, #141a2b 100%); }
+    header { padding:48px 20px 24px; text-align:center; }
+    h1 { margin:0 0 10px; font-size: clamp(28px, 4vw, 44px); letter-spacing:-0.02em; }
+    p.lead { margin:0 auto; max-width:800px; color:#c9d0e0; font-size: clamp(16px, 2vw, 18px); }
+    main { padding:40px 20px 120px; display:grid; place-items:center; }
+    .card { background:#0f172a; border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:28px; max-width:900px; width:100%; box-shadow:0 20px 40px rgba(0,0,0,.35); }
+    .card h2 { margin:0 0 8px; font-size:22px; }
+    .card p { margin:0; color:#c7cfe0; }
+    .hint { margin-top:10px; font-size:14px; color:#aab3c5; }
+
+    /* --- Chat widget (your snippet + tiny a11y tweaks) --- */
+    .chat-launcher{position:fixed;right:20px;bottom:20px;border:0;border-radius:999px;padding:12px 16px;
+      box-shadow:0 6px 20px rgba(0,0,0,.25);background:#0b1220;color:#fff;font-weight:600;cursor:pointer;z-index:9999}
+    .chat-panel{position:fixed;right:20px;bottom:80px;width:320px;max-height:70vh;background:#fff;border-radius:14px;
+      box-shadow:0 12px 32px rgba(0,0,0,.25);display:none;flex-direction:column;overflow:hidden;z-index:9999}
+    .chat-header{padding:10px 12px;background:#0b1220;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:space-between}
+    .chat-close{background:transparent;border:0;color:#fff;opacity:.8;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px;border-radius:6px}
+    .chat-close:hover{opacity:1;background:rgba(255,255,255,.1)}
+    .chat-body{padding:12px;overflow:auto;gap:8px;display:flex;flex-direction:column;max-height:55vh}
+    .chat-msg{padding:8px 10px;border-radius:10px;max-width:85%;white-space:pre-wrap;word-wrap:break-word}
+    .chat-user{align-self:flex-end;background:#e6f0ff}
+    .chat-bot{align-self:flex-start;background:#f4f6f8}
+    .chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid #eee;background:#fafafa}
+    .chat-input input{flex:1;padding:10px;border:1px solid #ddd;border-radius:10px}
+    .chat-input button{padding:10px 14px;border:0;border-radius:10px;background:#0b1220;color:#fff;font-weight:600}
+    .chat-input button[disabled]{opacity:.6;cursor:not-allowed}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>21M With Privacy</h1>
+    <p class="lead">A simple page showing the on-site chatbot you can ship with your Zcash campaign.</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>How it works</h2>
+      <p>This page includes a floating chat bubble (bottom-right). Click it to open the assistant. The front-end posts to <code>/api/chat</code> — add that serverless endpoint with your OpenAI key to go live.</p>
+      <p class="hint">Tip: paste this file into your repo as <code>index.html</code>. Then create <code>/api/chat.js</code> as shown earlier.</p>
+    </section>
+  </main>
+
+  <!-- Chat widget -->
+  <button class="chat-launcher" id="chat-launcher" aria-haspopup="dialog" aria-controls="chat-panel" aria-expanded="false">Chat</button>
+
+  <div class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Site assistant">
+    <div class="chat-header">
+      <div>Ask me anything</div>
+      <button class="chat-close" id="chat-close" aria-label="Close chat">×</button>
+    </div>
+    <div class="chat-body" id="chat-body" aria-live="polite"></div>
+    <div class="chat-input">
+      <input id="chat-input" type="text" placeholder="Type a message…" aria-label="Message" />
+      <button id="chat-send">Send</button>
+    </div>
+  </div>
+
+  <script>
+    // --- Config ---
+    const API_ENDPOINT = '/api/chat'; // change if your API lives elsewhere
+
+    // --- Elements ---
+    const launcher = document.getElementById('chat-launcher');
+    const panel = document.getElementById('chat-panel');
+    const closeBtn = document.getElementById('chat-close');
+    const body = document.getElementById('chat-body');
+    const input = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('chat-send');
+
+    // --- Conversation state (kept in-memory) ---
+    const messages = [
+      { role: 'system', content: 'You are a concise, friendly site assistant.' }
+    ];
+
+    // --- Helpers ---
+    function addMsg(text, who) {
+      const div = document.createElement('div');
+      div.className = 'chat-msg ' + (who === 'user' ? 'chat-user' : 'chat-bot');
+      div.textContent = text;
+      body.appendChild(div);
+      body.scrollTop = body.scrollHeight;
+    }
+
+    function togglePanel(show) {
+      const isOpen = show ?? (panel.style.display !== 'flex');
+      panel.style.display = isOpen ? 'flex' : 'none';
+      launcher.setAttribute('aria-expanded', String(isOpen));
+      if (isOpen) input.focus();
+    }
+
+    async function send() {
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      addMsg(text, 'user');
+
+      // typing placeholder
+      addMsg('…', 'bot');
+      sendBtn.disabled = true;
+
+      const payload = { messages: messages.concat({ role: 'user', content: text }) };
+
+      try {
+        const res = await fetch(API_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          body.lastChild.textContent = 'Server error: ' + (errText || res.status);
+        } else {
+          const data = await res.json();
+          body.lastChild.textContent = data.reply || 'Sorry, no reply.';
+          messages.push({ role: 'user', content: text }, { role: 'assistant', content: data.reply || '' });
+        }
+      } catch (e) {
+        body.lastChild.textContent = 'Error talking to the bot. Is /api/chat deployed?';
+      } finally {
+        sendBtn.disabled = false;
+        body.scrollTop = body.scrollHeight;
+      }
+    }
+
+    // --- Wire up UI ---
+    launcher.addEventListener('click', () => togglePanel(true));
+    closeBtn.addEventListener('click', () => togglePanel(false));
+
+    sendBtn.addEventListener('click', send);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+      if (e.key === 'Escape') togglePanel(false);
+    });
+
+    // Optional: greet on open (first time only)
+    let greeted = false;
+    panel.addEventListener('transitionend', () => {
+      if (!greeted && panel.style.display === 'flex') {
+        greeted = true;
+        addMsg("Hi! I can answer questions about the campaign. Ask me about Zcash, wallets, or the #21MWithPrivacy movement.", 'bot');
+      }
+    });
+
+    // Fallback: greet immediately if transitions aren’t used
+    launcher.addEventListener('click', () => {
+      if (!greeted) {
+        greeted = true;
+        setTimeout(() => addMsg("Hi! I can answer questions about the campaign. Ask me about Zcash, wallets, or the #21MWithPrivacy movement.", 'bot'), 50);
+      }
+    });
+  </script>
+</body>
+</html>
